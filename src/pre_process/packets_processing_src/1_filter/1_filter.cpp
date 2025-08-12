@@ -1,8 +1,10 @@
 #include "PcapFileDevice.h"
 #include "Packet.h"
 #include "IPv4Layer.h"
+#include "IPv6Layer.h"
 #include <iostream>
 #include <string>
+#include <set>
 
 int main(int argc, char *argv[]) {
     if (argc < 3 or argc > 4) {
@@ -48,6 +50,9 @@ int main(int argc, char *argv[]) {
 
     long diff = 0;
     bool first = true;
+
+    // Set to store unique IP addresses
+    std::set<std::string> uniqueIPs;
 
     pcpp::RawPacket rawPacket;
     while (reader->getNextPacket(rawPacket)) {
@@ -110,6 +115,21 @@ int main(int argc, char *argv[]) {
                 }
 
                 writer->writePacket(rawPacket);
+
+                // Extract and store IP addresses from successfully written packets
+                if (isIPv4) {
+                    pcpp::IPv4Layer* ipv4Layer = parsedPacket.getLayerOfType<pcpp::IPv4Layer>();
+                    if (ipv4Layer != nullptr) {
+                        uniqueIPs.insert(ipv4Layer->getSrcIPAddress().toString());
+                        uniqueIPs.insert(ipv4Layer->getDstIPAddress().toString());
+                    }
+                } else if (isIPv6) {
+                    pcpp::IPv6Layer* ipv6Layer = parsedPacket.getLayerOfType<pcpp::IPv6Layer>();
+                    if (ipv6Layer != nullptr) {
+                        uniqueIPs.insert(ipv6Layer->getSrcIPAddress().toString());
+                        uniqueIPs.insert(ipv6Layer->getDstIPAddress().toString());
+                    }
+                }
             }
         }
     }
@@ -118,6 +138,15 @@ int main(int argc, char *argv[]) {
     if (writerOpened) {
         writer->close();
     }
+
+    // Print unique IP addresses
+    std::cout << "\n=== Unique IP Addresses in Filtered File ===" << std::endl;
+    std::cout << "Total unique IP addresses: " << uniqueIPs.size() << std::endl;
+    std::cout << "IP addresses:" << std::endl;
+    for (const auto& ip : uniqueIPs) {
+        std::cout << "  " << ip << std::endl;
+    }
+    std::cout << "===========================================" << std::endl;
 
     return 0;
 }
