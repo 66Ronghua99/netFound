@@ -51,9 +51,33 @@ int process_file(const std::string input_file, const std::string output_file, bo
         return 1;
     }
 
-    std::ofstream outputFileStream;
-
+    // First pass: count total packets in the flow
     pcpp::RawPacket rawPacket;
+    uint64_t totalPacketCount = 0;
+    while (reader->getNextPacket(rawPacket)) {
+        totalPacketCount++;
+    }
+    
+    // Skip processing if flow has less than 3 packets
+    if (totalPacketCount < 2) {
+        std::cout << "Skipping file " << input_file << " - flow has only " << totalPacketCount << " packets (minimum 2 required)" << std::endl;
+        reader->close();
+        return 0;
+    }
+
+    // Reset reader for second pass
+    reader->close();
+    reader = pcpp::IFileReaderDevice::getReader(input_file);
+    if (reader == nullptr) {
+        std::cerr << "Cannot determine reader for file: " << input_file << std::endl;
+        return 1;
+    }
+    if (!reader->open()) {
+        std::cerr << "Error opening input pcap file: " << input_file << std::endl;
+        return 1;
+    }
+
+    std::ofstream outputFileStream;
     uint64_t packetCount = 0;
     uint8_t global_protocol;
     uint32_t absolute_seq_src_ip = 0;

@@ -419,6 +419,7 @@ def tokenizer_helper(
             total_files = len(tokenization_args)
             for i, (inpt_file, label) in enumerate(tokenization_args, start=1):
                 result = tokenize_file(inpt_file, label)
+                print(f"Result: {result}")
 
                 if result is not None:
                     result[1] = slice_bytes_to_16bit_tokens(result[1])

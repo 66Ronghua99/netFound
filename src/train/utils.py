@@ -94,7 +94,7 @@ class CommonDataTrainingArguments:
             "help": "Directory with optional input evaluation data to evaluate the perplexity on (Apache Arrow files)"},
     )
     validation_split_percentage: Optional[int] = field(
-        default=30,
+        default=20,
         metadata={"help": "The percentage of the train set used as validation set in case there's no validation split"}
     )
     data_cache_dir: Optional[str] = field(
@@ -196,37 +196,60 @@ def get_90_percent_cpu_count():
 
 def load_train_test_datasets(logger, data_args):
     logger.warning("Loading datasets")
+    
     if data_args.test_dir is None:
-        data_args.test_dir = data_args.train_dir
-        train_split = f"train[{data_args.validation_split_percentage}%:]"
-        test_split = f"train[:{data_args.validation_split_percentage}%]"
+        # Load full dataset for stratified split
+        full_dataset = load_dataset(
+            "arrow",
+            data_dir=data_args.train_dir,
+            split="train",
+            cache_dir=data_args.data_cache_dir,
+            streaming=data_args.streaming,
+        )
+        
+        # Convert string labels to integers if needed
+        full_dataset = convert_string_labels_to_int(full_dataset, logger)
+        
+        # Perform stratified split to ensure even label distribution
+        train_dataset, test_dataset = stratified_train_test_split(
+            full_dataset, 
+            test_size=data_args.validation_split_percentage/100.0,
+            logger=logger
+        )
     else:
-        train_split = "train"
-        test_split = "train"
-
-    train_dataset = load_dataset(
-        "arrow",
-        data_dir=data_args.train_dir,
-        split=train_split,
-        cache_dir=data_args.data_cache_dir,
-        streaming=data_args.streaming,
-    )
-
-    test_dataset = load_dataset(
-        "arrow",
-        data_dir=data_args.test_dir,
-        split=test_split,
-        cache_dir=data_args.data_cache_dir,
-        streaming=data_args.streaming,
-    )
+        # Use separate train and test directories
+        train_dataset = load_dataset(
+            "arrow",
+            data_dir=data_args.train_dir,
+            split="train",
+            cache_dir=data_args.data_cache_dir,
+            streaming=data_args.streaming,
+        )
+        
+        test_dataset = load_dataset(
+            "arrow",
+            data_dir=data_args.test_dir,
+            split="train",
+            cache_dir=data_args.data_cache_dir,
+            streaming=data_args.streaming,
+        )
+        
+        # Convert string labels to integers for both datasets
+        # Use train dataset to establish label mapping
+        train_dataset = convert_string_labels_to_int(train_dataset, logger)
+        test_dataset = convert_string_labels_to_int(test_dataset, logger, label_mapping=getattr(train_dataset, 'label_mapping', None))
 
     if data_args.max_eval_samples is not None:
+        # Shuffle before selecting subset
+        test_dataset = test_dataset.shuffle(seed=42)
         test_dataset = test_dataset.select(
             range(min(test_dataset.shape[0], data_args.max_eval_samples))
         )
     if data_args.max_train_samples is not None:
+        # Shuffle before selecting subset
+        train_dataset = train_dataset.shuffle(seed=42)
         train_dataset = train_dataset.select(
-            range(min(train_dataset.shape[0], data_args.max_train_samples))
+            range(min(train_dataset.shape[0], int(data_args.max_train_samples)))
         )
 
     if not data_args.streaming:
@@ -239,7 +262,175 @@ def load_train_test_datasets(logger, data_args):
     train_dataset = train_dataset.add_column("total_bursts", total_bursts_train)
     test_dataset = test_dataset.add_column("total_bursts", total_bursts_test)
 
+    if data_args.test_dir is not None:
+        test_dataset = train_dataset
 
+        # Check labels in the dataset
+    if "labels" in train_dataset.column_names:
+        logger.warning("=== LABEL ANALYSIS ===")
+        labels = train_dataset["labels"]
+        unique_labels = set(labels)
+        logger.warning(f"Train unique labels: {sorted(unique_labels)}")
+        test_labels = test_dataset["labels"]
+        unique_test_labels = set(test_labels)
+        logger.warning(f"Test unique labels: {sorted(unique_test_labels)}")
+        
+        # Count frequency of each label
+        from collections import Counter
+        label_counts = Counter(labels)
+        logger.warning("Label distribution:")
+        for label, count in sorted(label_counts.items()):
+            logger.warning(f"  Label {label}: {count} samples ({count/len(labels)*100:.1f}%)")
+        
+        label_counts = Counter(test_labels)
+        logger.warning("Label distribution:")
+        for label, count in sorted(label_counts.items()):
+            logger.warning(f"  Label {label}: {count} samples ({count/len(test_labels)*100:.1f}%)")
+        
+        
+    else:
+        logger.warning("No 'labels' column found in dataset!")
+        logger.warning(f"Available columns: {train_dataset.column_names}")
+
+    return train_dataset, test_dataset
+
+
+def convert_string_labels_to_int(dataset, logger, label_mapping=None):
+    """
+    Convert string labels to integers and store the mapping.
+    
+    Args:
+        dataset: HuggingFace dataset
+        logger: Logger instance for output
+        label_mapping: Optional pre-existing label mapping to use
+    
+    Returns:
+        dataset: Dataset with integer labels and label_mapping attribute
+    """
+    if "labels" not in dataset.column_names:
+        return dataset
+    
+    raw_labels = dataset["labels"]
+    
+    # Check if labels are already integers
+    if isinstance(raw_labels[0], int):
+        logger.warning("Labels are already integers, no conversion needed")
+        return dataset
+    
+    # Convert string labels to integers
+    if label_mapping is None:
+        # Create new mapping from this dataset
+        unique_labels = sorted(list(set(raw_labels)))
+        label_mapping = {label: idx for idx, label in enumerate(unique_labels)}
+        logger.warning(f"Created label mapping: {label_mapping}")
+    else:
+        logger.warning(f"Using provided label mapping: {label_mapping}")
+    
+    # Convert labels using the mapping
+    int_labels = []
+    for label in raw_labels:
+        if label in label_mapping:
+            int_labels.append(label_mapping[label])
+        else:
+            logger.warning(f"Warning: Label '{label}' not found in mapping, using -1")
+            int_labels.append(-1)
+    
+    # Replace the labels column
+    dataset = dataset.remove_columns(["labels"])
+    dataset = dataset.add_column("labels", int_labels)
+    
+    # Store the mapping for reference
+    dataset.label_mapping = label_mapping
+    
+    logger.warning(f"Converted {len(raw_labels)} labels to integers")
+    logger.warning(f"Final unique labels: {sorted(set(int_labels))}")
+    
+    return dataset
+
+
+def stratified_train_test_split(dataset, test_size=0.3, logger=None):
+    """
+    Perform stratified train-test split to ensure even label distribution.
+    
+    Args:
+        dataset: HuggingFace dataset
+        test_size: Fraction of data to use for testing
+        logger: Logger instance for output
+    
+    Returns:
+        train_dataset, test_dataset: Split datasets with even label distribution
+    """
+    if "labels" not in dataset.column_names:
+        logger.warning("No 'labels' column found, using random split")
+        # Fall back to random split if no labels
+        total_size = len(dataset)
+        test_size_int = int(total_size * test_size)
+        train_size_int = total_size - test_size_int
+        
+        # Shuffle indices
+        import random
+        indices = list(range(total_size))
+        random.shuffle(indices)
+        
+        train_indices = indices[:train_size_int]
+        test_indices = indices[train_size_int:]
+        
+        train_dataset = dataset.select(train_indices)
+        test_dataset = dataset.select(test_indices)
+        
+        return train_dataset, test_dataset
+    
+    # Get labels and create stratified split
+    labels = dataset["labels"]
+    unique_labels = sorted(set(labels))
+    
+    if logger:
+        logger.warning(f"Performing stratified split with labels: {unique_labels}")
+        logger.warning(f"Test size: {test_size:.1%}")
+    
+    train_indices = []
+    test_indices = []
+    
+    for label in unique_labels:
+        # Get indices for this label
+        label_indices = [i for i, l in enumerate(labels) if l == label]
+        label_count = len(label_indices)
+        
+        # Calculate split sizes for this label
+        test_count = max(1, int(label_count * test_size))  # At least 1 sample in test
+        train_count = label_count - test_count
+        
+        if logger:
+            logger.warning(f"Label {label}: {label_count} total, {train_count} train, {test_count} test")
+        
+        # Shuffle and split
+        import random
+        random.shuffle(label_indices)
+        
+        train_indices.extend(label_indices[:train_count])
+        test_indices.extend(label_indices[train_count:])
+    
+    # Shuffle final indices to avoid label clustering
+    import random
+    random.shuffle(train_indices)
+    random.shuffle(test_indices)
+    
+    train_dataset = dataset.select(train_indices)
+    test_dataset = dataset.select(test_indices)
+    
+    if logger:
+        logger.warning(f"Final split: {len(train_dataset)} train, {len(test_dataset)} test")
+        
+        # Verify distribution
+        train_labels = train_dataset["labels"]
+        test_labels = test_dataset["labels"]
+        
+        logger.warning("Final label distribution:")
+        for label in unique_labels:
+            train_count = sum(1 for l in train_labels if l == label)
+            test_count = sum(1 for l in test_labels if l == label)
+            logger.warning(f"  Label {label}: {train_count} train, {test_count} test")
+    
     return train_dataset, test_dataset
 
 

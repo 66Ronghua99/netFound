@@ -15,3 +15,6 @@ src/pre_process/3_field_extraction
 models/
 example.log
 **/.env
+data/
+**/*.log
+nohup.out

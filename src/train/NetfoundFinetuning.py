@@ -155,8 +155,10 @@ def main():
     }
     if not data_args.streaming:
         params['num_proc'] = data_args.preprocessing_num_workers or get_90_percent_cpu_count()
+    print("Before mapping:",set(train_dataset["labels"]))
     train_dataset = train_dataset.map(function=trainingTokenizer, **params)
     test_dataset = test_dataset.map(function=testingTokenizer, **params)
+    print("After mapping:",set(train_dataset["labels"]))
 
     if "WORLD_SIZE" in os.environ and training_args.local_rank == 0 and not data_args.streaming:
         logger.warning("Loading results from main process")

@@ -67,16 +67,20 @@ def preprocess_finetune(args):
     for label in os.listdir(f"{input_folder}/raw"):
         for stage_name in ["filtered", "split", "extracted", "final/shards"]:
             os.makedirs(os.path.join(input_folder, stage_name, label), exist_ok=True)
+        # if len(os.listdir(f"{input_folder}/filtered/{label}")) == 0:
         run([f"{base_directory}/src/pre_process/1_filter.sh", f"{input_folder}/raw/{label}",
              f"{input_folder}/filtered/{label}"])
+        # if len(os.listdir(f"{input_folder}/split/{label}")) == 0:
         run([f"{base_directory}/src/pre_process/2_pcap_splitting.sh", f"{input_folder}/filtered/{label}",
-             f"{input_folder}/split/{label}"])
+                 f"{input_folder}/split/{label}"])
+        # if len(os.listdir(f"{input_folder}/extracted/{label}")) == 0:
         run([f"{base_directory}/src/pre_process/3_extract_fields.sh", f"{input_folder}/split/{label}",
-             f"{input_folder}/extracted/{label}", "1" if args.tcp_options else ""])
+                 f"{input_folder}/extracted/{label}", "1" if args.tcp_options else ""])
 
         for folder_name in os.listdir(f"{input_folder}/extracted/{label}"):
             full_folder_name = os.path.join(f"{input_folder}/extracted/{label}", folder_name)
             os.makedirs(os.path.join(f"{input_folder}/final/shards/{label}", folder_name), exist_ok=True)
+            # if len(os.listdir(f"{input_folder}/final/shards/{label}/{folder_name}")) == 0:
             run(["python3", f"{base_directory}/src/pre_process/Tokenize.py", "--conf_file", args.tokenizer_config,
                  "--input_dir", full_folder_name, "--output_dir",
                  os.path.join(f"{input_folder}/final/shards/{label}", folder_name), '--label', label])

@@ -33,11 +33,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (!writer->open()) {
-        // Handle error
-        std::cerr << "Error opening output file: " << argv[2] << std::endl;
-        return 1;
-    }
+    // Delay opening the writer until we know the input link-layer type for the first packet we actually intend to write.
+    bool writerOpened = false;
+    bool writerIsPcap = outFileName.ends_with(".pcap");
+    pcpp::LinkLayerType selectedLinkLayer = pcpp::LINKTYPE_INVALID;
 
     // parse the optional argument
     bool enable_time_shift = false;
@@ -64,18 +63,61 @@ int main(int argc, char *argv[]) {
         }
 
         pcpp::Packet parsedPacket(&rawPacket);
-        auto *ipLayer = parsedPacket.getLayerOfType<pcpp::IPv4Layer>();
-        if (ipLayer != nullptr && (ipLayer->getIPv4Header()->ipVersion == 4 || ipLayer->getIPv4Header()->ipVersion == 6) ) {
+        bool isIPv4 = parsedPacket.isPacketOfType(pcpp::IPv4);
+        bool isIPv6 = parsedPacket.isPacketOfType(pcpp::IPv6);
+        if (isIPv4 || isIPv6) {
             if (parsedPacket.isPacketOfType(pcpp::TCP) ||
                 parsedPacket.isPacketOfType(pcpp::UDP) ||
                 parsedPacket.isPacketOfType(pcpp::ICMP)) {
+
+                pcpp::LinkLayerType current_link_layer = rawPacket.getLinkLayerType();
+                // std::cout << " - Current link layer: " << current_link_layer << std::endl;
+
+                if (!writerOpened) {
+                    if (writerIsPcap) {
+                        selectedLinkLayer = current_link_layer;
+                        auto *pcapWriter = dynamic_cast<pcpp::PcapFileWriterDevice *>(writer);
+                        if (pcapWriter == nullptr) {
+                            std::cerr << "Internal error: writer type mismatch for .pcap" << std::endl;
+                            reader->close();
+                            delete writer;
+                            return 1;
+                        }
+                        if (!pcapWriter->open(selectedLinkLayer)) {
+                            std::cerr << "Error opening output file with link-layer " << selectedLinkLayer
+                                      << ": " << argv[2] << std::endl;
+                            reader->close();
+                            delete writer;
+                            return 1;
+                        }
+                        std::cerr << "Opened .pcap writer with link-layer: " << selectedLinkLayer << std::endl;
+                    } else {
+                        if (!writer->open()) {
+                            std::cerr << "Error opening output file: " << argv[2] << std::endl;
+                            reader->close();
+                            delete writer;
+                            return 1;
+                        }
+                        std::cerr << "Opened .pcapng writer" << std::endl;
+                    }
+                    writerOpened = true;
+                }
+
+                if (writerIsPcap && current_link_layer != selectedLinkLayer) {
+                    std::cerr << "Skipping packet: link-layer mismatch (packet=" << current_link_layer
+                              << ", file=" << selectedLinkLayer << ")" << std::endl;
+                    continue;
+                }
+
                 writer->writePacket(rawPacket);
             }
         }
     }
 
     reader->close();
-    writer->close();
+    if (writerOpened) {
+        writer->close();
+    }
 
     return 0;
 }

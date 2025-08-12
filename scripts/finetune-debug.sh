@@ -1,0 +1,25 @@
+python /home/ronghua/codes/netFound/src/train/NetfoundFinetuning.py \
+  --train_dir /home/ronghua/codes/netFound/data/ISCVPN2016/final/shards \
+  --test_dir /home/ronghua/codes/netFound/data/ISCVPN2016/final/shards \
+  --model_name_or_path /home/ronghua/codes/netFound/models/pretrained_model \
+  --output_dir /home/ronghua/codes/netFound/models/ISCXVPN_overfit_debug \
+  --overwrite_output_dir \
+  --do_train --do_eval \
+  --num_labels 6 \
+  --learning_rate 1e-5 \
+  --lr_scheduler_type constant \
+  --warmup_ratio 0.0 \
+  --weight_decay 0.01 \
+  --num_train_epochs 200 \
+  --save_safetensors false \
+  --per_device_train_batch_size 2 \
+  --per_device_eval_batch_size 8 \
+  --eval_strategy steps \
+  --eval_steps 20 \
+  --logging_steps 20 \
+  --save_strategy steps \
+  --save_steps 20 \
+  --max_train_samples 128 \
+  --max_eval_samples 128 \
+  --seed 42 \
+  --metric_for_best_model eval_loss --greater_is_better false --load_best_model_at_end true --save_total_limit 1

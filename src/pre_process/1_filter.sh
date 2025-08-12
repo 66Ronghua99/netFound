@@ -22,4 +22,5 @@ if [ ! -f "$filter_script" ]; then
     exit 1
 fi
 
-find "$input_folder" -type f | parallel "$filter_script {} $output_folder/{/}"
+# Write outputs as .pcapng to avoid link-layer mismatches
+find "$input_folder" -type f | parallel "$filter_script {} $output_folder/{/.}.pcapng"
