@@ -158,7 +158,7 @@ public:
 		// Count connections eligible for writing (at least 2 packets)
 		size_t eligibleCount = 0;
 		for (const auto& entry : connections) {
-			if (entry.second.size() >= 2) {
+			if (entry.second.size() >= 3) {
 				eligibleCount++;
 			}
 		}
@@ -168,7 +168,7 @@ public:
 		int fileCount = 0;
 		for (const auto& [connKey, packets] : connections) {
 			// Skip flows with fewer than 2 packets
-			if (packets.size() < 2) {
+			if (packets.size() < 3) {
 				continue;
 			}
 			

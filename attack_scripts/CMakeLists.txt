@@ -10,4 +10,7 @@ find_package(PcapPlusPlus REQUIRED)
 add_executable(substitute_flow_headers substitute_flow_headers.cpp)
 target_link_libraries(substitute_flow_headers PUBLIC PcapPlusPlus::Pcap++)
 
+add_executable(remove_first_packet remove_first_packet.cpp)
+target_link_libraries(remove_first_packet PUBLIC PcapPlusPlus::Pcap++)
+
 
