@@ -154,38 +154,50 @@ public:
     
     bool writeConnections() {
         // Create output directory if it doesn't exist
-        std::filesystem::create_directories(outputDir);
-        
-        std::cout << "Writing " << connections.size() << " connection files to: " << outputDir << std::endl;
-        
-        int fileCount = 0;
-        for (const auto& [connHash, packets] : connections) {
-            fileCount++;
-            if (fileCount % 100 == 0) {
-                std::cout << "Written " << fileCount << " files..." << std::endl;
-            }
-            
-            std::string filename = connHash.toFilename() + ".pcapng";
-            std::string filepath = outputDir + "/" + filename;
-            
-            auto* writer = new pcpp::PcapNgFileWriterDevice(filepath);
-            if (!writer->open()) {
-                std::cerr << "Error opening output file: " << filepath << std::endl;
-                delete writer;
-                continue;
-            }
-            
-            // Write all packets for this connection
-            for (const auto& packet : packets) {
-                writer->writePacket(packet);
-            }
-            
-            writer->close();
-            delete writer;
-        }
-        
-        std::cout << "Successfully wrote " << fileCount << " connection files" << std::endl;
-        return true;
+		
+		// Count connections eligible for writing (at least 2 packets)
+		size_t eligibleCount = 0;
+		for (const auto& entry : connections) {
+			if (entry.second.size() >= 2) {
+				eligibleCount++;
+			}
+		}
+		
+		std::cout << "Writing " << eligibleCount << " connection files to: " << outputDir << std::endl;
+		
+		int fileCount = 0;
+		for (const auto& [connKey, packets] : connections) {
+			// Skip flows with fewer than 2 packets
+			if (packets.size() < 2) {
+				continue;
+			}
+			
+			std::string filename = connKey.toFilename() + ".pcapng";
+			std::string filepath = outputDir + "/" + filename;
+			
+			auto* writer = new pcpp::PcapNgFileWriterDevice(filepath);
+			if (!writer->open()) {
+				std::cerr << "Error opening output file: " << filepath << std::endl;
+				delete writer;
+				continue;
+			}
+			
+			// Write all packets for this connection
+			for (const auto& packet : packets) {
+				writer->writePacket(packet);
+			}
+			
+			writer->close();
+			delete writer;
+			
+			fileCount++;
+			if (fileCount % 100 == 0) {
+				std::cout << "Written " << fileCount << " files..." << std::endl;
+			}
+		}
+		
+		std::cout << "Successfully wrote " << fileCount << " connection files" << std::endl;
+		return true;
     }
     
     void printStatistics() {
