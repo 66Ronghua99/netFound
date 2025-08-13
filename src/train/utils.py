@@ -193,6 +193,106 @@ def verify_checkpoint(logger, training_args):
 def get_90_percent_cpu_count():
     return max(1, int(os.cpu_count() * 0.9))
 
+def load_train_test_datasets_no_header(logger, data_args):
+    logger.warning("Loading datasets")
+    
+    if data_args.test_dir is None:
+        # Load full dataset for stratified split
+        full_dataset = load_dataset(
+            "arrow",
+            data_dir=data_args.train_dir,
+            split="train",
+            cache_dir=data_args.data_cache_dir,
+            streaming=data_args.streaming,
+        )
+        
+        # Convert string labels to integers if needed
+        full_dataset = convert_string_labels_to_int(full_dataset, logger)
+        
+        # Perform stratified split to ensure even label distribution
+        train_dataset, test_dataset = stratified_train_test_split(
+            full_dataset, 
+            test_size=data_args.validation_split_percentage/100.0,
+            logger=logger
+        )
+    else:
+        # Use separate train and test directories
+        train_dataset = load_dataset(
+            "arrow",
+            data_dir=data_args.train_dir,
+            split="train",
+            cache_dir=data_args.data_cache_dir,
+            streaming=data_args.streaming,
+        )
+        
+        test_dataset = load_dataset(
+            "arrow",
+            data_dir=data_args.test_dir,
+            split="train",
+            cache_dir=data_args.data_cache_dir,
+            streaming=data_args.streaming,
+        )
+        
+        # Convert string labels to integers for both datasets
+        # Use train dataset to establish label mapping
+        train_dataset = convert_string_labels_to_int(train_dataset, logger)
+        test_dataset = convert_string_labels_to_int(test_dataset, logger, label_mapping=getattr(train_dataset, 'label_mapping', None))
+
+    if data_args.max_eval_samples is not None:
+        # Shuffle before selecting subset
+        test_dataset = test_dataset.shuffle(seed=42)
+        test_dataset = test_dataset.select(
+            range(min(test_dataset.shape[0], data_args.max_eval_samples))
+        )
+    if data_args.max_train_samples is not None:
+        # Shuffle before selecting subset
+        train_dataset = train_dataset.shuffle(seed=42)
+        train_dataset = train_dataset.select(
+            range(min(train_dataset.shape[0], int(data_args.max_train_samples)))
+        )
+
+    if not data_args.streaming:
+        total_bursts_train = [0] * len(train_dataset)
+        total_bursts_test = [0] * len(test_dataset)
+    else:
+        total_bursts_train = defaultdict(lambda: 0)
+        total_bursts_test = defaultdict(lambda: 0)
+
+    train_dataset = train_dataset.add_column("total_bursts", total_bursts_train)
+    test_dataset = test_dataset.add_column("total_bursts", total_bursts_test)
+
+    if data_args.test_dir is not None:
+        test_dataset = train_dataset
+
+        # Check labels in the dataset
+    if "labels" in train_dataset.column_names:
+        logger.warning("=== LABEL ANALYSIS ===")
+        labels = train_dataset["labels"]
+        unique_labels = set(labels)
+        logger.warning(f"Train unique labels: {sorted(unique_labels)}")
+        test_labels = test_dataset["labels"]
+        unique_test_labels = set(test_labels)
+        logger.warning(f"Test unique labels: {sorted(unique_test_labels)}")
+        
+        # Count frequency of each label
+        from collections import Counter
+        label_counts = Counter(labels)
+        logger.warning("Label distribution:")
+        for label, count in sorted(label_counts.items()):
+            logger.warning(f"  Label {label}: {count} samples ({count/len(labels)*100:.1f}%)")
+        
+        label_counts = Counter(test_labels)
+        logger.warning("Label distribution:")
+        for label, count in sorted(label_counts.items()):
+            logger.warning(f"  Label {label}: {count} samples ({count/len(test_labels)*100:.1f}%)")
+        
+        
+    else:
+        logger.warning("No 'labels' column found in dataset!")
+        logger.warning(f"Available columns: {train_dataset.column_names}")
+
+    return train_dataset, test_dataset
+
 
 def load_train_test_datasets(logger, data_args):
     logger.warning("Loading datasets")

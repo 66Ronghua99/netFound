@@ -8,7 +8,7 @@ python \
     src/train/NetfoundFinetuning.py \
     --train_dir /home/ronghua/codes/IoTdataset/CICIoT2023/final/shards \
     --model_name_or_path models/pretrained_model \
-    --output_dir models/CICIoT_finetuned3 \
+    --output_dir models/CICIoT_finetuned4 \
     --report_to tensorboard \
     --overwrite_output_dir \
     --save_safetensors false \

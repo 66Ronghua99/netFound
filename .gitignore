@@ -12,6 +12,7 @@ data/test/*
 build/
 src/pre_process/1_filter
 src/pre_process/3_field_extraction
+src/pre_process/2_split_connection
 models/
 example.log
 **/.env

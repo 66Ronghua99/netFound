@@ -70,8 +70,8 @@ def preprocess_finetune(args):
         # if len(os.listdir(f"{input_folder}/filtered/{label}")) == 0:
         run([f"{base_directory}/src/pre_process/1_filter.sh", f"{input_folder}/raw/{label}",
              f"{input_folder}/filtered/{label}"])
-        # if len(os.listdir(f"{input_folder}/split/{label}")) == 0:
-        run([f"{base_directory}/src/pre_process/2_pcap_splitting.sh", f"{input_folder}/filtered/{label}",
+        # # if len(os.listdir(f"{input_folder}/split/{label}")) == 0:
+        run([f"{base_directory}/src/pre_process/2_split_connection.sh", f"{input_folder}/filtered/{label}",
                  f"{input_folder}/split/{label}"])
         # if len(os.listdir(f"{input_folder}/extracted/{label}")) == 0:
         run([f"{base_directory}/src/pre_process/3_extract_fields.sh", f"{input_folder}/split/{label}",

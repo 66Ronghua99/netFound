@@ -11,14 +11,30 @@
 #include <sstream>
 #include <iomanip>
 #include <arpa/inet.h>
+#include <functional>
 
-// Connection identifier structure
-struct ConnectionKey {
+// Hash function for connection identification
+struct ConnectionHash {
     std::string src_ip;
     std::string dst_ip;
     uint16_t src_port;
     uint16_t dst_port;
     std::string protocol;
+    
+    // Create a unique hash for the connection
+    size_t hash() const {
+        std::hash<std::string> string_hash;
+        std::hash<uint16_t> port_hash;
+        
+        // Combine all connection parameters into a single hash
+        size_t h = string_hash(src_ip);
+        h ^= string_hash(dst_ip) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= port_hash(src_port) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= port_hash(dst_port) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= string_hash(protocol) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        
+        return h;
+    }
     
     // Create filename-friendly string
     std::string toFilename() const {
@@ -29,21 +45,36 @@ struct ConnectionKey {
         return oss.str();
     }
     
-    // For map comparison
-    bool operator<(const ConnectionKey& other) const {
-        if (src_ip != other.src_ip) return src_ip < other.src_ip;
-        if (dst_ip != other.dst_ip) return dst_ip < other.dst_ip;
-        if (src_port != other.src_port) return src_port < other.src_port;
-        if (dst_port != other.dst_port) return dst_port < other.dst_port;
-        return protocol < other.protocol;
+    // For map comparison (using hash as key)
+    bool operator<(const ConnectionHash& other) const {
+        return hash() < other.hash();
+    }
+    
+    // Equality comparison
+    bool operator==(const ConnectionHash& other) const {
+        return src_ip == other.src_ip && 
+               dst_ip == other.dst_ip && 
+               src_port == other.src_port && 
+               dst_port == other.dst_port && 
+               protocol == other.protocol;
     }
 };
+
+// Hash function for std::unordered_map (if needed)
+namespace std {
+    template<>
+    struct hash<ConnectionHash> {
+        size_t operator()(const ConnectionHash& conn) const {
+            return conn.hash();
+        }
+    };
+}
 
 class ConnectionSplitter {
 private:
     std::string inputFile;
     std::string outputDir;
-    std::map<ConnectionKey, std::vector<pcpp::RawPacket>> connections;
+    std::map<ConnectionHash, std::vector<pcpp::RawPacket>> connections;
     std::set<std::string> uniqueIPs;
     
 public:
@@ -84,30 +115,30 @@ public:
                 uniqueIPs.insert(srcIP);
                 uniqueIPs.insert(dstIP);
                 
-                ConnectionKey connKey;
+                ConnectionHash connHash;
                 
                 // Handle TCP packets
                 auto* tcpLayer = parsedPacket.getLayerOfType<pcpp::TcpLayer>();
                 if (tcpLayer != nullptr) {
-                    connKey.src_ip = srcIP;
-                    connKey.dst_ip = dstIP;
-                    connKey.src_port = ntohs(tcpLayer->getTcpHeader()->portSrc);
-                    connKey.dst_port = ntohs(tcpLayer->getTcpHeader()->portDst);
-                    connKey.protocol = "tcp";
+                    connHash.src_ip = srcIP;
+                    connHash.dst_ip = dstIP;
+                    connHash.src_port = ntohs(tcpLayer->getTcpHeader()->portSrc);
+                    connHash.dst_port = ntohs(tcpLayer->getTcpHeader()->portDst);
+                    connHash.protocol = "tcp";
                     
-                    connections[connKey].push_back(rawPacket);
+                    connections[connHash].push_back(rawPacket);
                 }
                 // Handle UDP packets
                 else {
                     auto* udpLayer = parsedPacket.getLayerOfType<pcpp::UdpLayer>();
                     if (udpLayer != nullptr) {
-                        connKey.src_ip = srcIP;
-                        connKey.dst_ip = dstIP;
-                        connKey.src_port = ntohs(udpLayer->getUdpHeader()->portSrc);
-                        connKey.dst_port = ntohs(udpLayer->getUdpHeader()->portDst);
-                        connKey.protocol = "udp";
+                        connHash.src_ip = srcIP;
+                        connHash.dst_ip = dstIP;
+                        connHash.src_port = ntohs(udpLayer->getUdpHeader()->portSrc);
+                        connHash.dst_port = ntohs(udpLayer->getUdpHeader()->portDst);
+                        connHash.protocol = "udp";
                         
-                        connections[connKey].push_back(rawPacket);
+                        connections[connHash].push_back(rawPacket);
                     }
                 }
             }
@@ -128,13 +159,13 @@ public:
         std::cout << "Writing " << connections.size() << " connection files to: " << outputDir << std::endl;
         
         int fileCount = 0;
-        for (const auto& [connKey, packets] : connections) {
+        for (const auto& [connHash, packets] : connections) {
             fileCount++;
             if (fileCount % 100 == 0) {
                 std::cout << "Written " << fileCount << " files..." << std::endl;
             }
             
-            std::string filename = connKey.toFilename() + ".pcapng";
+            std::string filename = connHash.toFilename() + ".pcapng";
             std::string filepath = outputDir + "/" + filename;
             
             auto* writer = new pcpp::PcapNgFileWriterDevice(filepath);
@@ -166,9 +197,9 @@ public:
         std::map<std::string, int> srcIPCounts;
         std::map<std::string, int> dstIPCounts;
         
-        for (const auto& [connKey, packets] : connections) {
-            srcIPCounts[connKey.src_ip]++;
-            dstIPCounts[connKey.dst_ip]++;
+        for (const auto& [connHash, packets] : connections) {
+            srcIPCounts[connHash.src_ip]++;
+            dstIPCounts[connHash.dst_ip]++;
         }
         
         std::cout << "\nTop 10 source IPs by connection count:" << std::endl;
